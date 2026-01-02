@@ -1,20 +1,24 @@
 const std = @import("std");
 const zg8 = @import("zg8");
+const fonts = @import("font.zig");
 
 pub fn main() !void {
     var cpu = Cpu.init();
-    cpu.loadRom("asdf") catch |err| switch (err) {
+    cpu.loadRom("demo.ch8") catch |err| switch (err) {
         error.RomTooLarge => undefined,
         else => undefined,
     };
+    std.debug.print("Memory dump {any}", .{cpu.memory});
 }
 
-const START_ADDRESS = 0x200;
+const start_address = 0x200;
+const font_start_address = 0x50;
+
 const Cpu = struct {
     registers: [16]u8,
     memory: [4096]u8,
     index: u16,
-    pc: u16 = START_ADDRESS,
+    pc: u16 = start_address,
     stack: [16]u16,
     sp: u4,
     delay_timer: u8,
@@ -24,13 +28,17 @@ const Cpu = struct {
     opcode: u16,
 
     pub fn init() Cpu {
+        // TODO: not sure if this can be const, we'll see
+        var mem = std.mem.zeroes([4096]u8);
+
+        @memcpy(mem[font_start_address .. font_start_address + fonts.font_set.len], &fonts.font_set);
         return Cpu{
             // std.mem.zeroes is a helper that returns a zeroed-out
             // version of whatever type you ask for.
             .registers = std.mem.zeroes([16]u8),
-            .memory = std.mem.zeroes([4096]u8),
+            .memory = mem,
             .index = 0,
-            .pc = START_ADDRESS, // CHIP-8 programs always start here
+            .pc = start_address, // CHIP-8 programs always start here
             .stack = std.mem.zeroes([16]u16),
             .sp = 0,
             .delay_timer = 0,
@@ -46,12 +54,12 @@ const Cpu = struct {
 
         // 2. Get file size and verify it fits
         const stat = try file.stat();
-        if (stat.size > self.memory.len - 0x200) {
+        if (stat.size > self.memory.len - start_address) {
             return error.RomTooLarge;
         }
 
         // 3. Define the slice of memory where the ROM lives
-        const target_memory = self.memory[0x200 .. 0x200 + stat.size];
+        const target_memory = self.memory[start_address .. start_address + stat.size];
 
         // 4. Read Loop (The "Systems" Way)
         // We loop because the OS might not give us all bytes in one shot.
