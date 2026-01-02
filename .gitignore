@@ -1,0 +1,5 @@
+# roms
+*.ch8
+# zig folders
+.zig-cache/
+zig-out/
