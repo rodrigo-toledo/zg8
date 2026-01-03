@@ -84,6 +84,38 @@ const Cpu = struct {
 
         std.debug.print("Successfully loaded {d} bytes.\n", .{total_read});
     }
+
+    pub fn step(self: *Cpu) !void {
+        // Fetch
+        const pc = self.pc;
+        const high = self.memory[pc];
+        const low = self.memory[pc + 1];
+        const opcode = (@as(u16, high) << 8) | low;
+        self.pc += 2;
+
+        // Decode & Execute in one flat structure
+        switch (opcode) {
+            // 1. Handle specific "Fixed" opcodes first
+            0x00E0 => self.clearScreen(),
+            0x00EE => self.returnFromSubroutine(),
+            0x1000...0x1FFF => self.jump(opcode),
+
+            else => return error.UnknownOpcode,
+        }
+    }
+
+    pub fn clearScreen(self: *Cpu) !void {
+        self.video = std.mem.zeroes([video_rows][video_columns]bool);
+    }
+
+    pub fn returnFromSubroutine(self: *Cpu) !void {
+        self.sp -= 1;
+        self.pc = self.stack[self.sp];
+    }
+
+    pub fn jump(self: *Cpu, opcode: Opcode) !void {
+        self.pc = Decode.nnn(opcode);
+    }
 };
 fn rand() u8 {
     return std.crypto.random.int(u8);
