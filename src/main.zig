@@ -88,6 +88,54 @@ const Cpu = struct {
 fn rand() u8 {
     return std.crypto.random.int(u8);
 }
+
+const Opcode = u16;
+
+// Helper struct to namespace your decoding logic
+const Decode = struct {
+
+    // Extracts the top 4 bits (0x1000 -> 0x1)
+    fn kind(op: Opcode) u4 {
+        return @as(u4, @intCast((op & 0xF000) >> 12));
+    }
+
+    // 0x0X00 -> Return X (The second nibble)
+    fn x(op: Opcode) u8 {
+        return @as(u8, @intCast((op & 0x0F00) >> 8));
+    }
+
+    // 0x00Y0 -> Return Y (The third nibble)
+    fn y(op: Opcode) u8 {
+        return @as(u8, @intCast((op & 0x00F0) >> 4));
+    }
+
+    // 0x000N -> Return N (The fourth nibble, height/value)
+    fn n(op: Opcode) u8 {
+        return @as(u8, @intCast(op & 0x000F));
+    }
+
+    // 0x00NN -> Return NN (The last byte, 8-bit immediate)
+    fn nn(op: Opcode) u8 {
+        return @as(u8, @intCast(op & 0x00FF));
+    }
+
+    // 0x0NNN -> Return NNN (The address, 12-bit immediate)
+    fn nnn(op: Opcode) u16 {
+        return op & 0x0FFF;
+    }
+};
+
+test "Opcode test" {
+    const opcode = 0xABCD;
+
+    try std.testing.expectEqual(Decode.kind(opcode), 0xA);
+    try std.testing.expectEqual(Decode.x(opcode), 0xB);
+    try std.testing.expectEqual(Decode.y(opcode), 0xC);
+    try std.testing.expectEqual(Decode.n(opcode), 0xD);
+    try std.testing.expectEqual(Decode.nn(opcode), 0xCD);
+    try std.testing.expectEqual(Decode.nnn(opcode), 0xBCD);
+}
+
 // (Recommended) Key mapping
 //Keypad       Keyboard
 //+-+-+-+-+    +-+-+-+-+
