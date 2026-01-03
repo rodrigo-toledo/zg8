@@ -8,43 +8,49 @@ pub fn main() !void {
         error.RomTooLarge => undefined,
         else => undefined,
     };
-    std.debug.print("Memory dump {any}", .{cpu.memory});
+    std.debug.print("{d} Memory dump {any}", .{ rand(), cpu.memory });
 }
 
 const start_address = 0x200;
 const font_start_address = 0x50;
+const mem_size = 4096;
+const keys = 16;
+const stack_levels = 16;
+const video_rows = 64;
+const video_columns = 32;
+const register_count = 16;
 
 const Cpu = struct {
-    registers: [16]u8,
-    memory: [4096]u8,
+    registers: [register_count]u8,
+    memory: [mem_size]u8,
     index: u16,
     pc: u16 = start_address,
-    stack: [16]u16,
+    stack: [stack_levels]u16,
     sp: u4,
     delay_timer: u8,
     sound_timer: u8,
-    keypad: [16]u8,
-    video: [64][32]bool, // guide uses u32 for compat with SDL
+    keypad: [keys]u8,
+    video: [video_rows][video_columns]bool, // guide uses u32 for compat with SDL
     opcode: u16,
 
     pub fn init() Cpu {
         // TODO: not sure if this can be const, we'll see
-        var mem = std.mem.zeroes([4096]u8);
+        var mem = std.mem.zeroes([mem_size]u8);
 
         @memcpy(mem[font_start_address .. font_start_address + fonts.font_set.len], &fonts.font_set);
         return Cpu{
             // std.mem.zeroes is a helper that returns a zeroed-out
             // version of whatever type you ask for.
-            .registers = std.mem.zeroes([16]u8),
+            .registers = std.mem.zeroes([register_count]u8),
             .memory = mem,
             .index = 0,
             .pc = start_address, // CHIP-8 programs always start here
-            .stack = std.mem.zeroes([16]u16),
+            .stack = std.mem.zeroes([stack_levels]u16),
             .sp = 0,
             .delay_timer = 0,
             .sound_timer = 0,
-            .keypad = std.mem.zeroes([16]u8),
-            .video = std.mem.zeroes([64][32]bool), // guide uses u32 for compat with SDL
+            .keypad = std.mem.zeroes([keys]u8),
+            .video = std.mem.zeroes([video_rows][video_columns]bool), // guide uses u32 for compat with SDL
             .opcode = 0,
         };
     }
@@ -79,7 +85,9 @@ const Cpu = struct {
         std.debug.print("Successfully loaded {d} bytes.\n", .{total_read});
     }
 };
-
+fn rand() u8 {
+    return std.crypto.random.int(u8);
+}
 // (Recommended) Key mapping
 //Keypad       Keyboard
 //+-+-+-+-+    +-+-+-+-+
