@@ -141,7 +141,11 @@ const Cpu = struct {
     ///Skip next instruction if Vx = kk.
     ///
     ///The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
-    pub fn Op3xkk(self: *Cpu, opcode: Opcode) !void {}
+    pub fn Op3xkk(self: *Cpu, opcode: Opcode) !void {
+        if (self.registers[Decode.x(opcode)] == Decode.nn(opcode)) {
+            self.pc += 2;
+        }
+    }
     ///4xkk - SNE Vx, byte
     ///Skip next instruction if Vx != kk.
     ///
