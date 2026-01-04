@@ -31,7 +31,6 @@ const Cpu = struct {
     sound_timer: u8,
     keypad: [keys]u8,
     video: [video_rows][video_columns]bool, // guide uses u32 for compat with SDL
-    opcode: u16,
 
     pub fn init() Cpu {
         // TODO: not sure if this can be const, we'll see
@@ -51,7 +50,6 @@ const Cpu = struct {
             .sound_timer = 0,
             .keypad = std.mem.zeroes([keys]u8),
             .video = std.mem.zeroes([video_rows][video_columns]bool), // guide uses u32 for compat with SDL
-            .opcode = 0,
         };
     }
     pub fn loadRom(self: *Cpu, filename: []const u8) !void { // 1. Open the file
@@ -96,24 +94,39 @@ const Cpu = struct {
         // Decode & Execute in one flat structure
         switch (opcode) {
             // 1. Handle specific "Fixed" opcodes first
-            0x00E0 => self.clearScreen(),
-            0x00EE => self.returnFromSubroutine(),
-            0x1000...0x1FFF => self.jump(opcode),
+            0x00E0 => self.CLS(),
+            0x00EE => self.RET(),
+            0x1000...0x1FFF => self.JPaddr(opcode),
+            0x2000...0x2FFF => self.call(opcode),
 
             else => return error.UnknownOpcode,
         }
     }
+    // Op codes implementation
 
-    pub fn clearScreen(self: *Cpu) !void {
+    ///00E0
+    pub fn CLS(self: *Cpu) !void {
         self.video = std.mem.zeroes([video_rows][video_columns]bool);
     }
 
-    pub fn returnFromSubroutine(self: *Cpu) !void {
+    ///00EE
+    pub fn RET(self: *Cpu) !void {
         self.sp -= 1;
         self.pc = self.stack[self.sp];
     }
 
-    pub fn jump(self: *Cpu, opcode: Opcode) !void {
+    ///1nnn
+    pub fn JPaddr(self: *Cpu, opcode: Opcode) !void {
+        self.pc = Decode.nnn(opcode);
+    }
+
+    ///2nnn
+    pub fn call(self: *Cpu, opcode: Opcode) !void {
+
+        // The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.
+        self.sp += 1;
+        self.stack[self.sp] = self.pc;
+
         self.pc = Decode.nnn(opcode);
     }
 };
