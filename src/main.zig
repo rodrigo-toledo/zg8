@@ -33,7 +33,6 @@ const Cpu = struct {
     video: [video_rows][video_columns]bool, // guide uses u32 for compat with SDL
 
     pub fn init() Cpu {
-        // TODO: not sure if this can be const, we'll see
         var mem = std.mem.zeroes([mem_size]u8);
 
         @memcpy(mem[font_start_address .. font_start_address + fonts.font_set.len], &fonts.font_set);
@@ -48,7 +47,7 @@ const Cpu = struct {
             .sp = 0,
             .delay_timer = 0,
             .sound_timer = 0,
-            .keypad = std.mem.zeroes([keys]u8),
+            .keypad = std.mem.zeroes([keys]u1),
             .video = std.mem.zeroes([video_rows][video_columns]bool), // guide uses u32 for compat with SDL
         };
     }
@@ -100,7 +99,7 @@ const Cpu = struct {
             0x2000...0x2FFF => self.Op2nnn(opcode),
             0x3000...0x3FFF => self.Op3xkk(opcode),
             0x4000...0x4FFF => self.Op4xkk(opcode),
-            0x5000...0x5FFF => self.Op5xy0(opcode), //TODO
+            0x5000...0x5FFF => self.Op5xy0(opcode),
             0x6000...0x6FFF => self.Op6xkk(opcode),
             0x7000...0x7FFF => self.Op7xkk(opcode),
             0x8000...0x8FFF => {
@@ -114,11 +113,35 @@ const Cpu = struct {
                     6 => self.Op8xy6(opcode),
                     7 => self.Op8xy7(opcode),
                     0xE => self.Op8xyE(opcode),
+                    //else => return error.UnknownOpcode
                 }
             },
-            0x7000...0x7FFF => self.Op7xkk(opcode),
-            0x7000...0x7FFF => self.Op7xkk(opcode),
-
+            0x9000...0x9FFF => self.Op9xy0(opcode),
+            0xA000...0xAFFF => self.OpAnnn(opcode),
+            0xB000...0xBFFF => self.OpBnnn(opcode),
+            0xC000...0xCFFF => self.OpCxkk(opcode),
+            0xD000...0xDFFF => self.OpDxyn(opcode),
+            0xE000...0xEFFF => {
+                switch (Decode.nn(opcode)) {
+                    0x9E => self.OpEx9E(opcode),
+                    0xA1 => self.OpExA1(opcode),
+                    else => return error.UnknownOpcode,
+                }
+            },
+            0xF000...0xFFFF => {
+                switch (Decode.nn(opcode)) {
+                    0x07 => self.OpFx07(opcode),
+                    0x0A => self.OpFx0A(opcode),
+                    0x15 => self.OpFx15(opcode),
+                    0x18 => self.OpFx18(opcode),
+                    0x1E => self.OpFx1E(opcode),
+                    0x29 => self.OpFx29(opcode),
+                    0x33 => self.OpFx33(opcode),
+                    0x55 => self.OpFx55(opcode),
+                    0x65 => self.OpFx65(opcode),
+                    else => return error.UnknownOpcode,
+                }
+            },
             else => return error.UnknownOpcode,
         }
     }
@@ -295,7 +318,7 @@ const Cpu = struct {
     ///
     ///The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.
     fn Op9xy0(self: *Cpu, opcode: Opcode) !void {
-        if (self.GetX(opcode) != self.GetY(opcode)) {
+        if (self.GetXFromReg(opcode) != self.GetYFromReg(opcode)) {
             self.pc += 2;
         }
     }
@@ -338,7 +361,7 @@ const Cpu = struct {
     ///
     ///Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
     fn OpEx9E(self: *Cpu, opcode: Opcode) !void {
-        if (self.keypad[GetX(opcode)] == 1) {
+        if (self.keypad[GetXFromReg(opcode)] == 1) {
             self.pc += 2;
         }
     }
@@ -348,7 +371,7 @@ const Cpu = struct {
     ///
     ///Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
     fn OpExA1(self: *Cpu, opcode: Opcode) !void {
-        if (self.keypad[GetX(opcode)] == 0) {
+        if (self.keypad[GetXFromReg(opcode)] == 0) {
             self.pc += 2;
         }
     }
@@ -366,84 +389,93 @@ const Cpu = struct {
     ///
     ///All execution stops until a key is pressed, then the value of that key is stored in Vx.
     fn OpFx0A(self: *Cpu, opcode: Opcode) !void {
-        var i: usize = 0;
-
-        main: while (true) {
-            // Access current item
-            const current = self.keypad[i];
-            if (current == 1) {
-                self.registers[Decode.x(opcode)] = current;
-                break :main;
+        for (self.keypad) |key| {
+            if (key == 1) {
+                self.registers[Decode.x(opcode)] = key;
+                return;
             }
-
-            // Increment and Wrap
-            i = (i + 1) % self.keypad.len;
         }
+        self.pc -= 2; // will run same opcode again
     }
 
     ///Fx15 - LD DT, Vx
     ///Set delay timer = Vx.
     ///
     ///DT is set equal to the value of Vx.
-    fn OpFx15(self: *Cpu, opcode: Opcode) !void {}
+    fn OpFx15(self: *Cpu, opcode: Opcode) !void {
+        self.delay_timer = self.GetXFromReg(opcode);
+    }
 
     ///Fx18 - LD ST, Vx
     ///Set sound timer = Vx.
     ///
     ///ST is set equal to the value of Vx.
-    fn OpFx18(self: *Cpu, opcode: Opcode) !void {}
+    fn OpFx18(self: *Cpu, opcode: Opcode) !void {
+        self.sound_timer = self.GetXFromReg(opcode);
+    }
 
     ///Fx1E - ADD I, Vx
     ///Set I = I + Vx.
     ///
     ///The values of I and Vx are added, and the results are stored in I.
-    fn OpFx1E(self: *Cpu, opcode: Opcode) !void {}
+    fn OpFx1E(self: *Cpu, opcode: Opcode) !void {
+        self.index += self.GetXFromReg(opcode);
+    }
 
     ///Fx29 - LD F, Vx
     ///Set I = location of sprite for digit Vx.
     ///
     ///The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx. See section 2.4, Display, for more information on the Chip-8 hexadecimal font.
-    fn OpFx29(self: *Cpu, opcode: Opcode) !void {}
+    fn OpFx29(self: *Cpu, opcode: Opcode) !void {
+        self.index = font_start_address + (5 * self.GetXFromReg(opcode)); // Each charater from the fontset is 5 bytes
+    }
 
-    ///Fx33 - LD B, Vx
-    ///Store BCD repr
-    /// _ = opcode;esentation of Vx in memory locations I, I+1, and I+2. //TODO (this is the hardest one)
-    ///
-    ///The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
-    fn OpFx33(self: *Cpu, opcode: Opcode) !void {}
+    /// Fx33 - LD B, Vx
+    /// Store BCD representation of Vx in memory locations I, I+1, and I+2.
+    /// The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
+    fn OpFx33(self: *Cpu, opcode: Opcode) !void {
+        var value = self.GetXFromReg(opcode);
 
-    ///Fx55 - LD [I], Vx
-    ///Store registers V0 through Vx in memory starting at location I.
-    //
-    /// if (self.keypad[GetX(opcode)]) {
-    /// self.pc += 2;}/
-    ///The interpreter copies the values of regi
-    /// _ = opcode;sters V0 through Vx into memory, starting at the address in I. //TODO (this is the hardest one)
-    fn OpFx55(self: *Cpu, opcode: Opcode) !void {}
+        self.memory[self.index + 2] = value % 10;
+        value /= value;
+
+        self.memory[self.index + 1] = value % 10;
+        value /= value;
+
+        self.memory[self.index] = value % 10;
+    }
+
+    //Fx55 - LD [I], Vx
+    //Store registers V0 through Vx in memory starting at location I.
+    //The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
+    fn OpFx55(self: *Cpu, opcode: Opcode) !void {
+        for (self.registers, 0..Decode.x(opcode)) |reg, i| {
+            self.memory[self.index + i] = reg;
+        }
+    }
 
     ///Fx65 - LD Vx, [I]
     ///Read registers V0 through Vx from memory starting at location I.
     ///
     ///The interpreter reads values from memory starting at location I into registers V0 through Vx.};
     fn OpFx65(self: *Cpu, opcode: Opcode) !void {
-        if (self.keypad[GetX(opcode)]) {
-            self.pc += 2;
+        for (self.registers, 0..Decode.x(opcode)) |reg, i| {
+            reg = self.memory[self.index + i];
         }
     }
 
-    fn GetX(self: *Cpu, opcode: Opcode) !u8 {
+    fn GetXFromReg(self: *Cpu, opcode: Opcode) !u8 {
         return self.registers[Decode.x(opcode)];
     }
 
-    fn GetY(self: *Cpu, opcode: Opcode) !u8 {
+    fn GetYFromReg(self: *Cpu, opcode: Opcode) !u8 {
         return self.registers[Decode.y(opcode)];
-    }
-
-    fn rand() u8 {
-        return std.crypto.random.int(u8);
     }
 };
 
+fn rand() u8 {
+    return std.crypto.random.int(u8);
+}
 const Opcode = u16;
 
 // Helper struct to namespace your decoding logic
