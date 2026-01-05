@@ -4,11 +4,13 @@ const fonts = @import("font.zig");
 
 pub fn main() !void {
     var cpu = Cpu.init();
-    cpu.loadRom("demo.ch8") catch |err| switch (err) {
+    cpu.loadRom("bc_test.ch8") catch |err| switch (err) {
         error.RomTooLarge => undefined,
         else => undefined,
     };
-    std.debug.print("{d} Memory dump {any}", .{ rand(), cpu.memory });
+    while (true) {
+        try cpu.cycle();
+    }
 }
 
 const start_address = 0x200;
@@ -30,7 +32,7 @@ const Cpu = struct {
     delay_timer: u8,
     sound_timer: u8,
     keypad: [keys]u1,
-    video: [video_height][video_width]u8, // guide uses u32 for compat with SDL
+    video: [video_width][video_height]u8, // guide uses u32 for compat with SDL
 
     pub fn init() Cpu {
         var mem = std.mem.zeroes([mem_size]u8);
@@ -51,6 +53,7 @@ const Cpu = struct {
             .video = std.mem.zeroes([video_width][video_height]u8), // guide uses u32 for compat with SDL
         };
     }
+
     pub fn loadRom(self: *Cpu, filename: []const u8) !void { // 1. Open the file
         var file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
@@ -82,7 +85,8 @@ const Cpu = struct {
         std.debug.print("Successfully loaded {d} bytes.\n", .{total_read});
     }
 
-    pub fn step(self: *Cpu) !void {
+    pub fn cycle(self: *Cpu) !void {
+
         // Fetch
         const pc = self.pc;
         const high = self.memory[pc];
@@ -90,55 +94,76 @@ const Cpu = struct {
         const opcode = (@as(u16, high) << 8) | low;
         self.pc += 2;
 
+        //Debug
+        std.debug.print("PC:{X:0>3} | Op:{X:0>4} | I:{X:0>3} | SP:{X}\n", .{ pc, opcode, self.index, self.sp });
+        // Decode + Execute
+        try self.step(opcode);
+
+        if (self.delay_timer > 0) {
+            self.delay_timer -= 1;
+        }
+
+        if (self.sound_timer > 0) {
+            self.sound_timer -= 1;
+        }
+    }
+
+    fn step(self: *Cpu, opcode: Opcode) !void {
+
         // Decode & Execute in one flat structure
         switch (opcode) {
             // 1. Handle specific "Fixed" opcodes first
-            0x00E0 => self.Op00E0(),
-            0x00EE => self.Op00EE(),
-            0x1000...0x1FFF => self.Op1nnn(opcode),
-            0x2000...0x2FFF => self.Op2nnn(opcode),
-            0x3000...0x3FFF => self.Op3xkk(opcode),
-            0x4000...0x4FFF => self.Op4xkk(opcode),
-            0x5000...0x5FFF => self.Op5xy0(opcode),
-            0x6000...0x6FFF => self.Op6xkk(opcode),
-            0x7000...0x7FFF => self.Op7xkk(opcode),
-            0x8000...0x8FFF => {
+            0x00E0 => try self.Op00E0(),
+            0x00EE => try self.Op00EE(),
+            0x1000...0x1FFF => try self.Op1nnn(opcode),
+            0x2000...0x2FFF => try self.Op2nnn(opcode),
+            0x3000...0x3FFF => try self.Op3xkk(opcode),
+            0x4000...0x4FFF => try self.Op4xkk(opcode),
+            0x5000...0x5FFF => {
                 switch (Decode.n(opcode)) {
-                    0 => self.Op8xy0(opcode),
-                    1 => self.Op8xy1(opcode),
-                    2 => self.Op8xy2(opcode),
-                    3 => self.Op8xy3(opcode),
-                    4 => self.Op8xy4(opcode),
-                    5 => self.Op8xy5(opcode),
-                    6 => self.Op8xy6(opcode),
-                    7 => self.Op8xy7(opcode),
-                    0xE => self.Op8xyE(opcode),
-                    //else => return error.UnknownOpcode
+                    0 => try self.Op5xy0(opcode),
+                    else => return error.UnknownOpcode,
                 }
             },
-            0x9000...0x9FFF => self.Op9xy0(opcode),
-            0xA000...0xAFFF => self.OpAnnn(opcode),
-            0xB000...0xBFFF => self.OpBnnn(opcode),
-            0xC000...0xCFFF => self.OpCxkk(opcode),
-            0xD000...0xDFFF => self.OpDxyn(opcode),
+            0x6000...0x6FFF => try self.Op6xkk(opcode),
+            0x7000...0x7FFF => try self.Op7xkk(opcode),
+            0x8000...0x8FFF => {
+                switch (Decode.n(opcode)) {
+                    0 => try self.Op8xy0(opcode),
+                    1 => try self.Op8xy1(opcode),
+                    2 => try self.Op8xy2(opcode),
+                    3 => try self.Op8xy3(opcode),
+                    4 => try self.Op8xy4(opcode),
+                    5 => try self.Op8xy5(opcode),
+                    6 => try self.Op8xy6(opcode),
+                    7 => try self.Op8xy7(opcode),
+                    0xE => try self.Op8xyE(opcode),
+                    else => return error.UnknownOpcode,
+                }
+            },
+            0x9000...0x9FFF => try self.Op9xy0(opcode),
+            0xA000...0xAFFF => try self.OpAnnn(opcode),
+            0xB000...0xBFFF => try self.OpBnnn(opcode),
+            0xC000...0xCFFF => try self.OpCxkk(opcode),
+            0xD000...0xDFFF => try self.OpDxyn(opcode),
             0xE000...0xEFFF => {
                 switch (Decode.nn(opcode)) {
-                    0x9E => self.OpEx9E(opcode),
-                    0xA1 => self.OpExA1(opcode),
+                    0x9E => try self.OpEx9E(opcode),
+                    0xA1 => try self.OpExA1(opcode),
                     else => return error.UnknownOpcode,
                 }
             },
             0xF000...0xFFFF => {
                 switch (Decode.nn(opcode)) {
-                    0x07 => self.OpFx07(opcode),
-                    0x0A => self.OpFx0A(opcode),
-                    0x15 => self.OpFx15(opcode),
-                    0x18 => self.OpFx18(opcode),
-                    0x1E => self.OpFx1E(opcode),
-                    0x29 => self.OpFx29(opcode),
-                    0x33 => self.OpFx33(opcode),
-                    0x55 => self.OpFx55(opcode),
-                    0x65 => self.OpFx65(opcode),
+                    0x07 => try self.OpFx07(opcode),
+                    0x0A => try self.OpFx0A(opcode),
+                    0x15 => try self.OpFx15(opcode),
+                    0x18 => try self.OpFx18(opcode),
+                    0x1E => try self.OpFx1E(opcode),
+                    0x29 => try self.OpFx29(opcode),
+                    0x33 => try self.OpFx33(opcode),
+                    0x55 => try self.OpFx55(opcode),
+                    0x65 => try self.OpFx65(opcode),
                     else => return error.UnknownOpcode,
                 }
             },
@@ -150,7 +175,7 @@ const Cpu = struct {
     /// 00E0 - CLS
     /// Clear the display.
     fn Op00E0(self: *Cpu) !void {
-        self.video = std.mem.zeroes([video_height][video_width]bool);
+        self.video = std.mem.zeroes([video_width][video_height]u8);
     }
 
     ///00EE - RET
@@ -276,7 +301,7 @@ const Cpu = struct {
         const x = Decode.x(opcode);
         const sum = @subWithOverflow(self.registers[x], self.registers[Decode.y(opcode)]);
         self.registers[x] = sum[0];
-        self.registers[0xF] = -1 * sum[1];
+        self.registers[0xF] = sum[1] ^ 1;
     }
 
     ///8xy6 - SHR Vx {, Vy}
@@ -299,7 +324,7 @@ const Cpu = struct {
         const y = Decode.y(opcode);
         const sum = @subWithOverflow(self.registers[y], self.registers[x]);
         self.registers[x] = sum[0];
-        self.registers[0xF] = -1 * sum[1];
+        self.registers[0xF] = sum[1] ^ 1;
     }
 
     ///8xyE - SHL Vx {, Vy}
@@ -359,7 +384,7 @@ const Cpu = struct {
         const Vy = self.GetYFromReg(opcode) % video_height;
         const n = Decode.n(opcode);
 
-        var collision = 0;
+        var collision: u1 = 0;
 
         for (self.memory[self.index .. self.index + n], 0..) |value, i| {
             const video_x = Vx + i;
@@ -376,7 +401,7 @@ const Cpu = struct {
                 const origValue = self.video[video_x][video_y];
                 const newValue = unpacked[j] ^ origValue;
 
-                if (collision == 0 and origValue and !newValue) { // First time a pixel is erased
+                if (collision == 0 and origValue != 0 and newValue == 0) { // First time a pixel is erased
                     collision = 1;
                 }
 
@@ -391,7 +416,7 @@ const Cpu = struct {
     ///
     ///Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
     fn OpEx9E(self: *Cpu, opcode: Opcode) !void {
-        if (self.keypad[GetXFromReg(opcode)] == 1) {
+        if (self.keypad[self.GetXFromReg(opcode)] == 1) {
             self.pc += 2;
         }
     }
@@ -401,7 +426,7 @@ const Cpu = struct {
     ///
     ///Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
     fn OpExA1(self: *Cpu, opcode: Opcode) !void {
-        if (self.keypad[GetXFromReg(opcode)] == 0) {
+        if (self.keypad[self.GetXFromReg(opcode)] == 0) {
             self.pc += 2;
         }
     }
@@ -489,16 +514,16 @@ const Cpu = struct {
     ///
     ///The interpreter reads values from memory starting at location I into registers V0 through Vx.};
     fn OpFx65(self: *Cpu, opcode: Opcode) !void {
-        for (self.registers, 0..Decode.x(opcode)) |reg, i| {
-            reg = self.memory[self.index + i];
+        for (self.registers, 0..Decode.x(opcode)) |_, i| {
+            self.registers[i] = self.memory[self.index + i];
         }
     }
 
-    fn GetXFromReg(self: *Cpu, opcode: Opcode) !u8 {
+    fn GetXFromReg(self: *Cpu, opcode: Opcode) u8 {
         return self.registers[Decode.x(opcode)];
     }
 
-    fn GetYFromReg(self: *Cpu, opcode: Opcode) !u8 {
+    fn GetYFromReg(self: *Cpu, opcode: Opcode) u8 {
         return self.registers[Decode.y(opcode)];
     }
 };
@@ -553,7 +578,7 @@ fn unpackByte(byte: u8) [8]u8 {
         // i=0 -> 10000000 (0x80)
         // i=1 -> 01000000 (0x40)
         // ...
-        const mask = 0x80 >> i; // @intCast(i);
+        const mask = @as(u16, 0x80) >> @intCast(i);
 
         // 2. Check if the bit is set
         if ((byte & mask) != 0) {
