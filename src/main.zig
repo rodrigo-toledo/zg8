@@ -16,8 +16,8 @@ const font_start_address = 0x50;
 const mem_size = 4096;
 const keys = 16;
 const stack_levels = 16;
-const video_rows = 64;
-const video_columns = 32;
+const video_height = 64;
+const video_width = 32;
 const register_count = 16;
 
 const Cpu = struct {
@@ -30,7 +30,7 @@ const Cpu = struct {
     delay_timer: u8,
     sound_timer: u8,
     keypad: [keys]u1,
-    video: [video_rows][video_columns]bool, // guide uses u32 for compat with SDL
+    video: [video_height][video_width]u8, // guide uses u32 for compat with SDL
 
     pub fn init() Cpu {
         var mem = std.mem.zeroes([mem_size]u8);
@@ -48,7 +48,7 @@ const Cpu = struct {
             .delay_timer = 0,
             .sound_timer = 0,
             .keypad = std.mem.zeroes([keys]u1),
-            .video = std.mem.zeroes([video_rows][video_columns]bool), // guide uses u32 for compat with SDL
+            .video = std.mem.zeroes([video_width][video_height]u8), // guide uses u32 for compat with SDL
         };
     }
     pub fn loadRom(self: *Cpu, filename: []const u8) !void { // 1. Open the file
@@ -150,7 +150,7 @@ const Cpu = struct {
     /// 00E0 - CLS
     /// Clear the display.
     fn Op00E0(self: *Cpu) !void {
-        self.video = std.mem.zeroes([video_rows][video_columns]bool);
+        self.video = std.mem.zeroes([video_height][video_width]bool);
     }
 
     ///00EE - RET
@@ -350,10 +350,40 @@ const Cpu = struct {
     ///Dxyn - DRW Vx, Vy, nibble
     ///Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
     ///
-    ///The interpreter reads n bytes from memory, starting at the address stored in I. These bytes are then displayed as sprites on screen at coordinates (Vx, Vy). Sprites are XORed onto the existing screen. If this causes any pixels to be erased, VF is set to 1, otherwise it is set to 0. If the sprite is positioned so part of it is outside the coordinates of the display, it wraps around to the opposite side of the screen. See instruction 8xy3 for more information on XOR, and section 2.4, Display, for more information on the Chip-8 screen and sprites.
+    /// The interpreter reads n bytes from memory, starting at the address stored in I. These bytes are then displayed as sprites on screen at coordinates (Vx, Vy).
+    /// Sprites are XORed onto the existing screen. If this causes any pixels to be erased, VF is set to 1, otherwise it is set to 0.
+    /// If the sprite is positioned so part of it is outside the coordinates of the display, it wraps around to the opposite side of the screen.
+    /// See instruction 8xy3 for more information on XOR, and section 2.4, Display, for more information on the Chip-8 screen and sprites.
     fn OpDxyn(self: *Cpu, opcode: Opcode) !void {
-        _ = self;
-        _ = opcode; //TODO (this is the hardest one)
+        const Vx = self.GetXFromReg(opcode) % video_width; // modulo is for wrapping around the screen
+        const Vy = self.GetYFromReg(opcode) % video_height;
+        const n = Decode.n(opcode);
+
+        var collision = 0;
+
+        for (self.memory[self.index .. self.index + n], 0..) |value, i| {
+            const video_x = Vx + i;
+            if (video_x > video_height) {
+                break;
+            }
+            const unpacked = unpackByte(value);
+
+            for (0..7) |j| {
+                const video_y = Vy + j;
+                if (video_y > video_width) {
+                    break;
+                }
+                const origValue = self.video[video_x][video_y];
+                const newValue = unpacked[j] ^ origValue;
+
+                if (collision == 0 and origValue and !newValue) { // First time a pixel is erased
+                    collision = 1;
+                }
+
+                self.video[video_x][video_y] = newValue;
+            }
+        }
+        self.registers[0xF] = collision;
     }
 
     ///Ex9E - SKP Vx
@@ -511,6 +541,29 @@ const Decode = struct {
         return op & 0x0FFF;
     }
 };
+
+/// Unpacks a single byte into an array of 8 bytes (0 or 1).
+/// Example: 0xA9 (10101001) -> [1, 0, 1, 0, 1, 0, 0, 1]
+fn unpackByte(byte: u8) [8]u8 {
+    var pixels: [8]u8 = undefined;
+
+    // We loop 8 times for 8 bits
+    for (0..8) |i| {
+        // 1. Create the mask to check one bit at a time
+        // i=0 -> 10000000 (0x80)
+        // i=1 -> 01000000 (0x40)
+        // ...
+        const mask = 0x80 >> i; // @intCast(i);
+
+        // 2. Check if the bit is set
+        if ((byte & mask) != 0) {
+            pixels[i] = 1;
+        } else {
+            pixels[i] = 0;
+        }
+    }
+    return pixels;
+}
 
 test "Opcode test" {
     const opcode = 0xABCD;
