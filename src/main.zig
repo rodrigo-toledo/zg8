@@ -6,7 +6,7 @@ const rl = @import("raylib");
 
 pub fn main() !void {
     var cpu = Cpu.init();
-    try cpu.loadRom("corax.ch8");
+    try cpu.loadRom("flags.ch8");
 
     const screen_height = video_height * scale;
     const screen_width = video_width * scale;
@@ -366,8 +366,8 @@ const Cpu = struct {
     fn Op8xy6(self: *Cpu, opcode: Opcode) !void {
         const x = Decode.x(opcode);
         const Vx = self.registers[x];
-        self.registers[0xF] = Vx & 1;
         self.registers[x] >>= 1;
+        self.registers[0xF] = Vx & 1;
     }
 
     ///8xy7 - SUBN Vx, Vy
@@ -389,8 +389,9 @@ const Cpu = struct {
     fn Op8xyE(self: *Cpu, opcode: Opcode) !void {
         const x = Decode.x(opcode);
         const Vx = self.registers[x];
-        self.registers[0xF] = Vx & 1;
+        const msb = (Vx & 0x80) >> 7;
         self.registers[x] <<= 1;
+        self.registers[0xF] = msb & 1;
     }
 
     ///9xy0 - SNE Vx, Vy
