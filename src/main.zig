@@ -4,13 +4,15 @@ const fonts = @import("font.zig");
 
 pub fn main() !void {
     var cpu = Cpu.init();
-    cpu.loadRom("bc_test.ch8") catch |err| switch (err) {
-        error.RomTooLarge => undefined,
-        else => undefined,
-    };
-    while (true) {
+    try cpu.loadRom("ibm_logo.ch8");
+
+    var count: usize = 0;
+    while (count < 200) : (count += 1) { //TODO: remove the hardcoded count?
         try cpu.cycle();
     }
+
+    // Now verify the result
+    cpu.debugDraw();
 }
 
 const start_address = 0x200;
@@ -18,8 +20,8 @@ const font_start_address = 0x50;
 const mem_size = 4096;
 const keys = 16;
 const stack_levels = 16;
-const video_height = 64;
-const video_width = 32;
+const video_width = 64;
+const video_height = 32;
 const register_count = 16;
 
 const Cpu = struct {
@@ -32,8 +34,29 @@ const Cpu = struct {
     delay_timer: u8,
     sound_timer: u8,
     keypad: [keys]u1,
-    video: [video_width][video_height]u8, // guide uses u32 for compat with SDL
+    video: [video_height][video_width]u8,
 
+    pub fn debugDraw(self: *Cpu) void {
+        // Top Border
+        std.debug.print("+" ++ ("-" ** video_width) ++ "+\n", .{});
+
+        for (0..video_height) |y| {
+            std.debug.print("|", .{});
+            for (0..video_width) |x| {
+                // Access as 2D array [row][col]
+                const pixel = self.video[y][x];
+                if (pixel == 1) {
+                    std.debug.print("#", .{});
+                } else {
+                    std.debug.print(" ", .{});
+                }
+            }
+            std.debug.print("|\n", .{});
+        }
+
+        // Bottom Border
+        std.debug.print("+" ++ ("-" ** video_width) ++ "+\n", .{});
+    }
     pub fn init() Cpu {
         var mem = std.mem.zeroes([mem_size]u8);
 
@@ -50,7 +73,7 @@ const Cpu = struct {
             .delay_timer = 0,
             .sound_timer = 0,
             .keypad = std.mem.zeroes([keys]u1),
-            .video = std.mem.zeroes([video_width][video_height]u8), // guide uses u32 for compat with SDL
+            .video = std.mem.zeroes([video_height][video_width]u8), // guide uses u32 for compat with SDL
         };
     }
 
@@ -95,7 +118,11 @@ const Cpu = struct {
         self.pc += 2;
 
         //Debug
-        std.debug.print("PC:{X:0>3} | Op:{X:0>4} | I:{X:0>3} | SP:{X}\n", .{ pc, opcode, self.index, self.sp });
+        //std.debug.print("PC:{X:0>3} | Op:{X:0>4} | I:{X:0>3} | SP:{X}\n", .{ pc, opcode, self.index, self.sp });
+
+        if (opcode != 0x130E) {
+            std.debug.print("PC:{X:0>3} | Op:{X:0>4} | I:{X:0>3} | SP:{X}\n", .{ pc, opcode, self.index, self.sp });
+        }
         // Decode + Execute
         try self.step(opcode);
 
@@ -175,7 +202,7 @@ const Cpu = struct {
     /// 00E0 - CLS
     /// Clear the display.
     fn Op00E0(self: *Cpu) !void {
-        self.video = std.mem.zeroes([video_width][video_height]u8);
+        self.video = std.mem.zeroes([video_height][video_width]u8);
     }
 
     ///00EE - RET
@@ -386,26 +413,26 @@ const Cpu = struct {
 
         var collision: u1 = 0;
 
-        for (self.memory[self.index .. self.index + n], 0..) |value, i| {
-            const video_x = Vx + i;
-            if (video_x > video_height) {
+        for (self.memory[self.index .. self.index + n], 0..) |value, j| {
+            const video_y = Vy + j;
+            if (video_y >= video_height) {
                 break;
             }
             const unpacked = unpackByte(value);
 
-            for (0..7) |j| {
-                const video_y = Vy + j;
-                if (video_y > video_width) {
+            for (unpacked, 0..) |_, i| { //
+                const video_x = Vx + i;
+                if (video_x >= video_width) {
                     break;
                 }
-                const origValue = self.video[video_x][video_y];
-                const newValue = unpacked[j] ^ origValue;
+                const origValue = self.video[video_y][video_x];
+                const newValue = unpacked[i] ^ origValue;
 
                 if (collision == 0 and origValue != 0 and newValue == 0) { // First time a pixel is erased
                     collision = 1;
                 }
 
-                self.video[video_x][video_y] = newValue;
+                self.video[video_y][video_x] = newValue;
             }
         }
         self.registers[0xF] = collision;
