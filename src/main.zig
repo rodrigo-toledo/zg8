@@ -6,15 +6,36 @@ const rl = @import("raylib");
 
 pub fn main() !void {
     var cpu = Cpu.init();
-    try cpu.loadRom("ibm_logo.ch8");
+    try cpu.loadRom("demo.ch8");
 
-    var count: usize = 0;
-    while (count < 200) : (count += 1) { //TODO: remove the hardcoded count?
+    const screen_height = video_height * scale;
+    const screen_width = video_width * scale;
+
+    rl.initWindow(screen_width, screen_height, "zig chip-8 emulator");
+
+    defer rl.closeWindow(); // Close window and OpenGL context
+
+    rl.setTargetFPS(target_fps); // Set our game to run at 60 frames-per-second
+
+    while (!rl.windowShouldClose()) {
         try cpu.cycle();
-    }
 
-    // Now verify the result
-    cpu.debugDraw();
+        rl.beginDrawing();
+        defer rl.endDrawing();
+
+        rl.clearBackground(.black);
+
+        for (cpu.video, 0..) |video_row, i| {
+            for (video_row, 0..) |pixel, j| {
+                const position_x: i32 = @as(i32, @intCast(j)) * scale;
+                const position_y: i32 = @as(i32, @intCast(i)) * scale;
+
+                if (pixel == 1) {
+                    rl.drawRectangle(position_x, position_y, scale, scale, .green);
+                }
+            }
+        }
+    }
 }
 
 const start_address = 0x200;
@@ -25,6 +46,9 @@ const stack_levels = 16;
 const video_width = 64;
 const video_height = 32;
 const register_count = 16;
+
+const scale: i32 = 10;
+const target_fps = 60;
 
 const Cpu = struct {
     registers: [register_count]u8,
@@ -59,6 +83,7 @@ const Cpu = struct {
         // Bottom Border
         std.debug.print("+" ++ ("-" ** video_width) ++ "+\n", .{});
     }
+
     pub fn init() Cpu {
         var mem = std.mem.zeroes([mem_size]u8);
 
@@ -142,6 +167,7 @@ const Cpu = struct {
         // Decode & Execute in one flat structure
         switch (opcode) {
             // 1. Handle specific "Fixed" opcodes first
+            0x0000 => return,
             0x00E0 => try self.Op00E0(),
             0x00EE => try self.Op00EE(),
             0x1000...0x1FFF => try self.Op1nnn(opcode),
@@ -211,8 +237,8 @@ const Cpu = struct {
     ///Return from a subroutine.
     ///The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
     fn Op00EE(self: *Cpu) !void {
-        self.sp -= 1;
         self.pc = self.stack[self.sp];
+        self.sp -= 1;
     }
 
     ///1nnn - JP addr
@@ -284,7 +310,7 @@ const Cpu = struct {
     ///
     ///Stores the value of register Vy in register Vx.
     fn Op8xy0(self: *Cpu, opcode: Opcode) !void {
-        self.registers[Decode.x(opcode)] += self.registers[Decode.y(opcode)];
+        self.registers[Decode.x(opcode)] = self.registers[Decode.y(opcode)];
     }
 
     ///8xy1 - OR Vx, Vy
@@ -533,7 +559,7 @@ const Cpu = struct {
     //Store registers V0 through Vx in memory starting at location I.
     //The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
     fn OpFx55(self: *Cpu, opcode: Opcode) !void {
-        for (self.registers, 0..Decode.x(opcode)) |reg, i| {
+        for (self.registers[0..Decode.x(opcode)], 0..) |reg, i| {
             self.memory[self.index + i] = reg;
         }
     }
@@ -543,7 +569,7 @@ const Cpu = struct {
     ///
     ///The interpreter reads values from memory starting at location I into registers V0 through Vx.};
     fn OpFx65(self: *Cpu, opcode: Opcode) !void {
-        for (self.registers, 0..Decode.x(opcode)) |_, i| {
+        for (self.registers[0..Decode.x(opcode)], 0..) |_, i| {
             self.registers[i] = self.memory[self.index + i];
         }
     }

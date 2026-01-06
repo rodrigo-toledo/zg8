@@ -1,14 +1,5 @@
 const std = @import("std");
 
-const raylib_dep = b.dependency("raylib_zig", .{
-    .target = target,
-    .optimize = optimize,
-});
-
-const raylib = raylib_dep.module("raylib"); // main raylib module
-const raygui = raylib_dep.module("raygui"); // raygui module
-const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
-
 // Although this function looks imperative, it does not perform the build
 // directly and instead it mutates the build graph (`b`) that will be then
 // executed by an external runner. The functions in `std.Build` implement a DSL
@@ -29,6 +20,16 @@ pub fn build(b: *std.Build) void {
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
     // in this directory.
+
+    // Raylib deps
+    const raylib_dep = b.dependency("raylib_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const raylib = raylib_dep.module("raylib"); // main raylib module
+    const raygui = raylib_dep.module("raygui"); // raygui module
+    const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
 
     // This creates a module, which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
