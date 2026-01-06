@@ -2,6 +2,8 @@ const std = @import("std");
 const zg8 = @import("zg8");
 const fonts = @import("font.zig");
 
+const rl = @import("raylib");
+
 pub fn main() !void {
     var cpu = Cpu.init();
     try cpu.loadRom("ibm_logo.ch8");
