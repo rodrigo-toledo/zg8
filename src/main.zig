@@ -6,7 +6,7 @@ const rl = @import("raylib");
 
 pub fn main() !void {
     var cpu = Cpu.init();
-    try cpu.loadRom("demo.ch8");
+    try cpu.loadRom("corax.ch8");
 
     const screen_height = video_height * scale;
     const screen_width = video_width * scale;
@@ -302,7 +302,7 @@ const Cpu = struct {
     ///
     ///Adds the value kk to the value of register Vx, then stores the result in Vx.
     fn Op7xkk(self: *Cpu, opcode: Opcode) !void {
-        self.registers[Decode.x(opcode)] += Decode.nn(opcode);
+        self.registers[Decode.x(opcode)] +%= Decode.nn(opcode); // wrap on overflow
     }
 
     ///8xy0 - LD Vx, Vy
