@@ -17,36 +17,37 @@ pub fn main() !void {
 
     rl.setTargetFPS(target_fps); // Set our game to run at 60 frames-per-second
 
+    // (Recommended) Key mapping
+    //Keypad       Keyboard
+    //+-+-+-+-+    +-+-+-+-+
+    //|1|2|3|C|    |1|2|3|4|
+    //+-+-+-+-+    +-+-+-+-+
+    //|4|5|6|D|    |Q|W|E|R|
+    //+-+-+-+-+ => +-+-+-+-+
+    //|7|8|9|E|    |A|S|D|F|
+    //+-+-+-+-+    +-+-+-+-+
+    //|A|0|B|F|    |Z|X|C|V|
+    //+-+-+-+-+    +-+-+-+-+
+    const key_map = [_]rl.KeyboardKey{
+        .x,
+        .one,
+        .two,
+        .three,
+        .q,
+        .w,
+        .e,
+        .a,
+        .s,
+        .d,
+        .z,
+        .c,
+        .four,
+        .r,
+        .f,
+        .v,
+    };
+
     while (!rl.windowShouldClose()) {
-        // (Recommended) Key mapping
-        //Keypad       Keyboard
-        //+-+-+-+-+    +-+-+-+-+
-        //|1|2|3|C|    |1|2|3|4|
-        //+-+-+-+-+    +-+-+-+-+
-        //|4|5|6|D|    |Q|W|E|R|
-        //+-+-+-+-+ => +-+-+-+-+
-        //|7|8|9|E|    |A|S|D|F|
-        //+-+-+-+-+    +-+-+-+-+
-        //|A|0|B|F|    |Z|X|C|V|
-        //+-+-+-+-+    +-+-+-+-+
-        const key_map = [_]rl.KeyboardKey{
-            .x,
-            .one,
-            .two,
-            .three,
-            .q,
-            .w,
-            .e,
-            .a,
-            .s,
-            .d,
-            .z,
-            .c,
-            .four,
-            .r,
-            .f,
-            .v,
-        };
         for (key_map, 0..) |key, i| {
             if (rl.isKeyDown(key)) {
                 cpu.keypad[i] = 1;
@@ -101,6 +102,7 @@ const Cpu = struct {
     sound_timer: u8,
     keypad: [keys]u1,
     video: [video_height][video_width]u8,
+    key_wait_release: ?u8 = null,
 
     pub fn debugDraw(self: *Cpu) void {
         // Top Border
@@ -141,6 +143,7 @@ const Cpu = struct {
             .sound_timer = 0,
             .keypad = std.mem.zeroes([keys]u1),
             .video = std.mem.zeroes([video_height][video_width]u8), // guide uses u32 for compat with SDL
+            .key_wait_release = null,
         };
     }
 
@@ -200,14 +203,6 @@ const Cpu = struct {
 
         // Decode + Execute
         try self.step(opcode);
-
-        if (self.delay_timer > 0) {
-            self.delay_timer -= 1;
-        }
-
-        if (self.sound_timer > 0) {
-            self.sound_timer -= 1;
-        }
     }
 
     fn step(self: *Cpu, opcode: Opcode) !void {
@@ -332,7 +327,7 @@ const Cpu = struct {
     ///
     ///The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.
     fn Op5xy0(self: *Cpu, opcode: Opcode) !void {
-        if (self.registers[Decode.x(opcode)] != self.registers[Decode.y(opcode)]) {
+        if (self.registers[Decode.x(opcode)] == self.registers[Decode.y(opcode)]) {
             self.pc += 2;
         }
     }
@@ -465,7 +460,7 @@ const Cpu = struct {
     ///
     ///The program counter is set to nnn plus the value of V0.
     fn OpBnnn(self: *Cpu, opcode: Opcode) !void {
-        self.pc = Decode.nnn(opcode) + self.registers[Decode.x(opcode)]; // quirk, cowgod description doesn't match implementation
+        self.pc = Decode.nnn(opcode) + self.registers[0];
     }
 
     ///Cxkk - RND Vx, byte
@@ -548,13 +543,53 @@ const Cpu = struct {
     ///
     ///All execution stops until a key is pressed, then the value of that key is stored in Vx.
     fn OpFx0A(self: *Cpu, opcode: Opcode) !void {
-        for (self.keypad, 0..) |key, i| {
-            if (key == 1) {
-                self.registers[Decode.x(opcode)] = @intCast(i);
-                return;
+        // State machine for key handling:
+        // null: Init state. Check if we need to wait for release or can wait for press.
+        // 16: Waiting for all keys to be released (debounce/stuck key prevention).
+        // 17: Waiting for a key press.
+
+        if (self.key_wait_release) |state| {
+            if (state == 16) {
+                // Waiting for all keys to be released
+                var any_pressed = false;
+                for (self.keypad) |key| {
+                    if (key == 1) {
+                        any_pressed = true;
+                        break;
+                    }
+                }
+                if (!any_pressed) {
+                    self.key_wait_release = 17; // Ready to accept input
+                }
+                self.pc -= 2;
+            } else if (state == 17) {
+                // Waiting for key press
+                for (self.keypad, 0..) |key, i| {
+                    if (key == 1) {
+                        self.registers[Decode.x(opcode)] = @intCast(i);
+                        self.key_wait_release = null; // Reset state
+                        return;
+                    }
+                }
+                self.pc -= 2;
             }
+        } else {
+            // Init state
+            var any_pressed = false;
+            for (self.keypad) |key| {
+                if (key == 1) {
+                    any_pressed = true;
+                    break;
+                }
+            }
+
+            if (any_pressed) {
+                self.key_wait_release = 16; // Must wait for release first
+            } else {
+                self.key_wait_release = 17; // Can wait for press immediately
+            }
+            self.pc -= 2;
         }
-        self.pc -= 2; // will run same opcode again
     }
 
     ///Fx15 - LD DT, Vx
@@ -596,10 +631,10 @@ const Cpu = struct {
         var value = self.GetXFromReg(opcode);
 
         self.memory[self.index + 2] = value % 10;
-        value /= value;
+        value /= 10;
 
         self.memory[self.index + 1] = value % 10;
-        value /= value;
+        value /= 10;
 
         self.memory[self.index] = value % 10;
     }
@@ -608,7 +643,7 @@ const Cpu = struct {
     //Store registers V0 through Vx in memory starting at location I.
     //The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
     fn OpFx55(self: *Cpu, opcode: Opcode) !void {
-        for (self.registers[0..Decode.x(opcode)], 0..) |reg, i| {
+        for (self.registers[0 .. Decode.x(opcode) + 1], 0..) |reg, i| {
             self.memory[self.index + i] = reg;
         }
     }
@@ -618,7 +653,7 @@ const Cpu = struct {
     ///
     ///The interpreter reads values from memory starting at location I into registers V0 through Vx.};
     fn OpFx65(self: *Cpu, opcode: Opcode) !void {
-        for (self.registers[0..Decode.x(opcode)], 0..) |_, i| {
+        for (self.registers[0 .. Decode.x(opcode) + 1], 0..) |_, i| {
             self.registers[i] = self.memory[self.index + i];
         }
     }
