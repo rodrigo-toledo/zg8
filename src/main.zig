@@ -6,7 +6,7 @@ const rl = @import("raylib");
 
 pub fn main() !void {
     var cpu = Cpu.init();
-    try cpu.loadRom("flags.ch8");
+    try cpu.loadRom("keypad.ch8");
 
     const screen_height = video_height * scale;
     const screen_width = video_width * scale;
@@ -18,7 +18,46 @@ pub fn main() !void {
     rl.setTargetFPS(target_fps); // Set our game to run at 60 frames-per-second
 
     while (!rl.windowShouldClose()) {
-        try cpu.cycle();
+        // (Recommended) Key mapping
+        //Keypad       Keyboard
+        //+-+-+-+-+    +-+-+-+-+
+        //|1|2|3|C|    |1|2|3|4|
+        //+-+-+-+-+    +-+-+-+-+
+        //|4|5|6|D|    |Q|W|E|R|
+        //+-+-+-+-+ => +-+-+-+-+
+        //|7|8|9|E|    |A|S|D|F|
+        //+-+-+-+-+    +-+-+-+-+
+        //|A|0|B|F|    |Z|X|C|V|
+        //+-+-+-+-+    +-+-+-+-+
+        const key_map = [_]rl.KeyboardKey{
+            .x,
+            .one,
+            .two,
+            .three,
+            .q,
+            .w,
+            .e,
+            .a,
+            .s,
+            .d,
+            .z,
+            .c,
+            .four,
+            .r,
+            .f,
+            .v,
+        };
+        for (key_map, 0..) |key, i| {
+            if (rl.isKeyDown(key)) {
+                cpu.keypad[i] = 1;
+            } else {
+                cpu.keypad[i] = 0;
+            }
+        }
+        for (0..instructions_per_cycle) |_| {
+            try cpu.cycle();
+        }
+        cpu.updateTimers();
 
         rl.beginDrawing();
         defer rl.endDrawing();
@@ -49,6 +88,7 @@ const register_count = 16;
 
 const scale: i32 = 10;
 const target_fps = 60;
+const instructions_per_cycle = 10;
 
 const Cpu = struct {
     registers: [register_count]u8,
@@ -135,6 +175,17 @@ const Cpu = struct {
         std.debug.print("Successfully loaded {d} bytes.\n", .{total_read});
     }
 
+    pub fn updateTimers(self: *Cpu) void {
+        if (self.delay_timer > 0) {
+            self.delay_timer -= 1;
+        }
+
+        if (self.sound_timer > 0) {
+            self.sound_timer -= 1;
+            // (Optional) If sound_timer == 1, play a beep sound here!
+        }
+    }
+
     pub fn cycle(self: *Cpu) !void {
 
         // Fetch
@@ -147,9 +198,6 @@ const Cpu = struct {
         //Debug
         //std.debug.print("PC:{X:0>3} | Op:{X:0>4} | I:{X:0>3} | SP:{X}\n", .{ pc, opcode, self.index, self.sp });
 
-        if (opcode != 0x130E) {
-            std.debug.print("PC:{X:0>3} | Op:{X:0>4} | I:{X:0>3} | SP:{X}\n", .{ pc, opcode, self.index, self.sp });
-        }
         // Decode + Execute
         try self.step(opcode);
 
@@ -417,7 +465,7 @@ const Cpu = struct {
     ///
     ///The program counter is set to nnn plus the value of V0.
     fn OpBnnn(self: *Cpu, opcode: Opcode) !void {
-        self.pc = Decode.nnn(opcode) + self.registers[0];
+        self.pc = Decode.nnn(opcode) + self.registers[Decode.x(opcode)]; // quirk, cowgod description doesn't match implementation
     }
 
     ///Cxkk - RND Vx, byte
@@ -467,7 +515,7 @@ const Cpu = struct {
         self.registers[0xF] = collision;
     }
 
-    ///Ex9E - SKP Vx
+    ///9E - SKP Vx
     ///Skip next instruction if key with the value of Vx is pressed.
     ///
     ///Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
@@ -500,9 +548,9 @@ const Cpu = struct {
     ///
     ///All execution stops until a key is pressed, then the value of that key is stored in Vx.
     fn OpFx0A(self: *Cpu, opcode: Opcode) !void {
-        for (self.keypad) |key| {
+        for (self.keypad, 0..) |key, i| {
             if (key == 1) {
-                self.registers[Decode.x(opcode)] = key;
+                self.registers[Decode.x(opcode)] = @intCast(i);
                 return;
             }
         }
@@ -656,18 +704,6 @@ test "Opcode test" {
     try std.testing.expectEqual(Decode.nn(opcode), 0xCD);
     try std.testing.expectEqual(Decode.nnn(opcode), 0xBCD);
 }
-
-// (Recommended) Key mapping
-//Keypad       Keyboard
-//+-+-+-+-+    +-+-+-+-+
-//|1|2|3|C|    |1|2|3|4|
-//+-+-+-+-+    +-+-+-+-+
-//|4|5|6|D|    |Q|W|E|R|
-//+-+-+-+-+ => +-+-+-+-+
-//|7|8|9|E|    |A|S|D|F|
-//+-+-+-+-+    +-+-+-+-+
-//|A|0|B|F|    |Z|X|C|V|
-//+-+-+-+-+    +-+-+-+-+
 
 test "simple test" {
     const gpa = std.testing.allocator;
